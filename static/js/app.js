@@ -8,6 +8,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // DOM Elements
     const refreshBtn = document.getElementById('refresh-btn');
     const refreshIcon = refreshBtn.querySelector('.refresh-icon');
+    const themeToggleBtn = document.getElementById('theme-toggle');
+    const exportCsvBtn = document.getElementById('export-csv-btn');
     const connectionStatus = document.getElementById('connection-status');
     const statusText = connectionStatus.querySelector('.status-text');
     
@@ -372,19 +374,19 @@ document.addEventListener('DOMContentLoaded', () => {
                     </svg>
                     <span>Tweet</span>
                 </button>
-                <button class="btn-card-action btn-card-copy-text" title="Copy release note text">
+                <button class="btn-card-action btn-card-copy-text" title="Copiar nota al portapapeles">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
                         <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
                     </svg>
-                    <span>Copy Text</span>
+                    <span>Copiar Nota</span>
                 </button>
-                <button class="btn-card-action btn-card-copy-link" title="Copy direct link to this date">
+                <button class="btn-card-action btn-card-copy-link" title="Copiar enlace directo al portapapeles">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
                         <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
                     </svg>
-                    <span>Copy Link</span>
+                    <span>Copiar Enlace</span>
                 </button>
             </div>
         `;
@@ -403,18 +405,18 @@ document.addEventListener('DOMContentLoaded', () => {
             try {
                 const text = `BigQuery Release Note (${dateStr}) - [${update.type}]\n${update.content_text}\n\nRead more: ${readMoreLink}`;
                 await navigator.clipboard.writeText(text);
-                showToast('Release text copied to clipboard!');
+                showToast('¡Nota copiada al portapapeles!');
             } catch (err) {
-                showToast('Failed to copy text.');
+                showToast('Error al copiar el texto.');
             }
         });
 
         copyLinkBtn.addEventListener('click', async () => {
             try {
                 await navigator.clipboard.writeText(cardShareLink);
-                showToast('Direct link to date copied!');
+                showToast('¡Enlace de fecha copiado!');
             } catch (err) {
-                showToast('Failed to copy link.');
+                showToast('Error al copiar el enlace.');
             }
         });
 
@@ -440,10 +442,98 @@ document.addEventListener('DOMContentLoaded', () => {
         document.body.style.overflow = ''; // restore scrolling
     }
 
+    // Theme Initialization
+    const currentTheme = localStorage.getItem('theme') || (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+    if (currentTheme === 'light') {
+        document.body.classList.add('light-theme');
+    }
+
     // Event Listeners Setup
     refreshBtn.addEventListener('click', () => {
         fetchReleases(true);
     });
+
+    // Theme Switcher Listener
+    themeToggleBtn.addEventListener('click', () => {
+        document.body.classList.toggle('light-theme');
+        const theme = document.body.classList.contains('light-theme') ? 'light' : 'dark';
+        localStorage.setItem('theme', theme);
+        showToast(`Modo ${theme === 'light' ? 'claro' : 'oscuro'} activado`);
+    });
+
+    // CSV Exporter Listener
+    exportCsvBtn.addEventListener('click', () => {
+        if (!releaseData || !releaseData.entries) {
+            showToast('No hay datos para exportar.');
+            return;
+        }
+
+        const rows = [['Date', 'Category', 'Description', 'Link']];
+
+        releaseData.entries.forEach(entry => {
+            const filteredUpdates = entry.updates.filter(update => {
+                // Category filter
+                if (activeCategory !== 'All') {
+                    const updateType = update.type.toLowerCase();
+                    const activeNorm = activeCategory.toLowerCase();
+                    if (activeNorm === 'feature' && !updateType.includes('feature')) return false;
+                    if (activeNorm === 'issue' && !updateType.includes('issue')) return false;
+                    if (activeNorm === 'change' && !updateType.includes('change')) return false;
+                    if (activeNorm === 'breaking' && !updateType.includes('breaking')) return false;
+                    if (activeNorm === 'announcement' && !updateType.includes('announcement')) return false;
+                }
+
+                // Search query filter
+                if (searchQuery) {
+                    const contentTextLower = update.content_text.toLowerCase();
+                    const typeLower = update.type.toLowerCase();
+                    const searchLower = searchQuery.toLowerCase();
+                    const matchesContent = contentTextLower.includes(searchLower);
+                    const matchesType = typeLower.includes(searchLower);
+                    const matchesDate = entry.date_str.toLowerCase().includes(searchLower);
+                    if (!matchesContent && !matchesType && !matchesDate) return false;
+                }
+
+                return true;
+            });
+
+            filteredUpdates.forEach(update => {
+                const readMoreLink = entry.link || 'https://docs.cloud.google.com/bigquery/docs/release-notes';
+                rows.push([
+                    entry.date_str,
+                    update.type,
+                    update.content_text,
+                    readMoreLink
+                ]);
+            });
+        });
+
+        if (rows.length <= 1) {
+            showToast('No hay notas que coincidan con los filtros para exportar.');
+            return;
+        }
+
+        const csvContent = rows.map(e => e.map(val => {
+            const cleanVal = (val || '').toString().replace(/"/g, '""');
+            return `"${cleanVal}"`;
+        }).join(",")).join("\n");
+
+        const blob = new Blob(["\ufeff" + csvContent], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement("a");
+        const url = URL.createObjectURL(blob);
+
+        link.setAttribute("href", url);
+        link.setAttribute("download", `bigquery_release_notes_${activeCategory.toLowerCase()}_${new Date().toISOString().slice(0,10)}.csv`);
+        link.style.visibility = 'hidden';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+
+        showToast('¡CSV exportado con éxito!');
+    });
+
+    // Initialize - Fetch notes on startup
+    fetchReleases();
 
     // Modal Events
     modalCloseBtn.addEventListener('click', closeTweetModal);
